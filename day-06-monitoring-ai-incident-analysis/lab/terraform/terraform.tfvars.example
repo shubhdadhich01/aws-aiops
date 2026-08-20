@@ -1,0 +1,176 @@
+###############################################################################
+# Day 06 — terraform.tfvars.example
+#
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored; this
+# example file is not.
+#
+#     cp terraform.tfvars.example terraform.tfvars
+#
+# Only ONE variable has no usable default: notification_email. Everything else
+# is deliberately set to a value that makes the lab work, and every line below
+# is commented out because the default is already correct.
+#
+# Uncomment things to break them on purpose. Several of the defaults exist to
+# stop you making an expensive mistake, and each of those says so.
+###############################################################################
+
+###############################################################################
+# REQUIRED
+###############################################################################
+
+# Where alarm notifications and incident summaries go. AWS emails you a
+# confirmation link within seconds of `terraform apply`, and the subscription
+# does NOTHING until you click it.
+notification_email = "you@example.com"
+
+###############################################################################
+# Identity & region — defaults are almost certainly fine
+###############################################################################
+
+# Keep this the same region your Bedrock model access is enabled in. Log data
+# crossing a region boundary to reach a model is OBS-013 and it is a
+# compliance question before it is a latency one.
+# aws_region  = "us-east-1"
+# aws_profile = "bootcamp"
+# owner       = "bootcamp-student"
+
+###############################################################################
+# Logging — where most of this day's money goes
+###############################################################################
+
+# 7 days is right for a lab you will destroy this afternoon. 30-90 is typical
+# in production. Anything longer belongs in S3 via a subscription filter.
+#
+# There is no value here meaning "never expire" — that state is reached by
+# OMITTING retention entirely, which is exactly why it happens by accident.
+# log_retention_days = 7
+
+# STANDARD or INFREQUENT_ACCESS. IA is half price ($0.25/GB instead of
+# $0.50/GB) and silently supports no metric filters, no subscription filters
+# and no Live Tail. Set it here and sections 4-7 of main.tf stop working, with
+# no error. The class cannot be changed after the group is created.
+# log_group_class = "STANDARD"
+
+###############################################################################
+# Alarm shape
+###############################################################################
+
+# 60 is standard resolution and free-tier friendly. 10 and 30 are
+# high-resolution: $0.30/alarm-month, NOT covered by the free ten, and much
+# noisier. Faster is not better if the extra speed is all variance.
+# alarm_period_seconds = 60
+
+# The M and the N in "M out of N datapoints". 3 of 5 means three of the last
+# five minutes breached. Setting both to 1 is the default shape people build
+# by accident, and it is how a team learns to ignore the alerts topic.
+# alarm_evaluation_periods  = 5
+# alarm_datapoints_to_alarm = 3
+
+# A RATE, not a count. 5% of requests failing means the same thing at 03:00
+# as it does at midday; "50 errors" does not.
+# error_rate_threshold_percent = 5
+
+# p95, not average. An average of 200ms is entirely consistent with one
+# request in twenty taking nine seconds.
+# latency_p95_threshold_ms = 2000
+
+###############################################################################
+# Dashboard
+###############################################################################
+
+# $3.00/month per dashboard beyond the first three. This stack creates one
+# (two with the broken examples on), so on a fresh account it is free.
+# create_dashboard = true
+
+###############################################################################
+# The chaos workload
+###############################################################################
+
+# chaos_lambda_runtime         = "python3.12"
+# chaos_lambda_memory_mb       = 128
+# chaos_lambda_timeout_seconds = 120
+
+# ⚠️ Lines emitted per invocation when the event does not say otherwise.
+# 400 lines is ~110 KB; you could run it 45,000 times inside the free 5 GB.
+# The guard exists because the obvious experiment — "what does the analyser do
+# with a really big incident?" — is one zero away from expensive.
+# chaos_default_burst_lines = 400
+
+###############################################################################
+# The deliberately-broken examples
+###############################################################################
+
+# Leave true the first time through. obs_audit.py against a clean account
+# prints a green score and teaches nothing; the findings ARE the lesson.
+#
+# Step 9 of the lab has you set this false and re-run the auditor, which is
+# the other half of the lesson: watching which checks correctly go silent.
+#
+# Never set this true in an account holding anything real. The broken log
+# group has no retention and bills forever.
+# create_insecure_examples = true
+
+###############################################################################
+# The AI half — Amazon Bedrock
+#
+# Every line in this block is a cost decision or a data-governance decision.
+# There is no purely technical default here.
+###############################################################################
+
+# You must REQUEST ACCESS to the model in the Bedrock console before any of
+# this works. An un-requested model returns AccessDenied and the error does
+# not say "go and click the button" — it is the most common first failure of
+# the day.
+# bedrock_model_id = "anthropic.claude-3-5-haiku-20241022-v1:0"
+
+# Empty string means "the same region as everything else", which is the only
+# value that does not need a conversation with someone about data residency.
+# Step 8 of the lab sets this to another region on purpose so you can watch
+# OBS-013 fire. That is the ONLY way it fires against this stack.
+# bedrock_region = ""
+
+# ⚠️ The most important number on this day. 12,000 tokens is ~48,000
+# characters, ~175 log lines. Longer is not better: cost scales linearly,
+# latency scales with input, and recall genuinely degrades over a very long
+# context — so sending everything makes the answer worse as well as slower.
+#
+# 0 disables the budget entirely. That is OBS-012 and the lab never asks for it.
+# analyser_max_input_tokens = 12000
+
+# A cruder guard in front of the token budget: bounds the Logs Insights bill
+# and the analyser's memory, neither of which the token budget protects.
+# analyser_max_log_lines = 600
+
+# Match this to your deploy frequency in production. The window has to be long
+# enough to contain the change that caused the incident, because that change is
+# what you are actually looking for.
+# analyser_lookback_minutes = 30
+
+# Best-effort regex redaction before the prompt. Leave it true, and do not
+# mistake it for a solution — it catches key shapes and token shapes, not a
+# customer's name in a free-text field. The real control is not logging it.
+# Setting false is OBS-011.
+# analyser_redact_logs = true
+
+# ⚠️ The switch that turns a $1 stack into a four-figure weekend. Every alarm
+# transition matched by the rule is a paid model invocation. Guards: M-of-N on
+# the alarm, the token budget above, and the idempotency window below.
+# enable_auto_analysis = true
+
+# One summary per alarm per window, no matter how much it flaps.
+# analyser_idempotency_minutes = 15
+
+# Default FALSE, and that is an argument rather than laziness. ON, you can
+# answer "what did the model actually see" — which is the first question after
+# a summary turns out to be confidently wrong. ALSO ON, every prompt and
+# completion lands in a CloudWatch log group readable by everyone with
+# CloudWatch read access. Enable it AND set retention AND put a resource policy
+# on the destination. Both halves or neither.
+#
+# With it false, OBS-016 fires. Step 9 turns it on for the 100/100 build.
+# enable_bedrock_invocation_logging = false
+
+# A Logs Insights query can take 30 seconds and a model call another 20, so
+# the AWS default of 3 seconds is nowhere near enough.
+# analyser_lambda_memory_mb       = 512
+# analyser_lambda_timeout_seconds = 180

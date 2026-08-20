@@ -1,0 +1,226 @@
+###############################################################################
+# Day 08 — terraform.tfvars.example
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#   # edit notification_email, then:
+#   terraform init && terraform plan
+#
+# terraform.tfvars is gitignored. THIS file is the documentation and IS
+# committed. Every value below is the default unless marked otherwise, so a
+# copy of this file with only notification_email changed produces exactly the
+# stack the finding contract describes.
+#
+# ============================ READ THIS FIRST ================================
+#
+# Day 08 costs real money — roughly $85/month at these defaults, against a few
+# cents a day for Days 01-07. The two largest lines are the NAT gateway
+# (~$36/month with its public IPv4) and the load balancer (~$21/month with its
+# per-AZ addresses), and NEITHER scales down when you stop using them. They
+# bill for existing.
+#
+# So: run the lab in one or two sittings, and tear down. `terraform destroy`
+# plus the teardown checklist, the same day. An idle Day 08 stack left running
+# for a month is the most expensive thing in this repo.
+###############################################################################
+
+###############################################################################
+# Identity & regions
+###############################################################################
+
+aws_region  = "us-east-1"
+dr_region   = "us-west-2"
+aws_profile = "bootcamp"
+owner       = "bootcamp-student"
+
+# THE ONLY VALUE YOU MUST CHANGE.
+# You will get a confirmation email. Click the link BEFORE step 7, or every
+# failover notification is accepted, billed and discarded.
+notification_email = "you@example.com"
+
+###############################################################################
+# The declared numbers
+#
+# These configure nothing. They are the claims you are about to be wrong
+# about. Change them to whatever you would actually put in a document, then go
+# and measure. Lab step 2 asks you to write down three predictions in seconds
+# before you touch anything.
+###############################################################################
+
+rto_target_minutes = 30
+rpo_target_minutes = 60
+
+###############################################################################
+# Network
+###############################################################################
+
+vpc_cidr = "10.80.0.0/16"
+az_count = 2
+
+# "single" (default), "per_az", or "none".
+#
+# single  ~$32.85/month + ~$3.65 for its public IPv4. One gateway, one AZ, and
+#         a single-AZ dependency inside an architecture called multi-AZ. This
+#         is check DR-002 and it is deliberately the default so the auditor has
+#         something true to say about YOUR stack.
+# per_az  ~$65.70/month + ~$7.30. Correct for production.
+# none    $0.00. Private subnets have no outbound route. This lab still works —
+#         the user-data installs nothing on purpose — and it is the cheapest
+#         way to run the rest of the day.
+nat_gateway_strategy = "single"
+
+###############################################################################
+# Compute
+###############################################################################
+
+instance_type        = "t3.micro"
+asg_min_size         = 2
+asg_max_size         = 4
+asg_desired_capacity = 2
+
+# "ELB" or "EC2". Leave it on ELB. The insecure examples build a second ASG
+# with "EC2" so you can audit both without running the broken one.
+asg_health_check_type = "ELB"
+
+# Set this SHORTER than your app's boot time and you get a termination loop
+# that looks like an AZ problem. Measure a boot to first passing health check,
+# then double it. This stack is ready in ~60s; 300 is margin for a guess.
+asg_health_check_grace_period = 300
+
+target_group_health_check = {
+  path                = "/health"
+  interval            = 30
+  timeout             = 5
+  healthy_threshold   = 3
+  unhealthy_threshold = 2
+  matcher             = "200"
+}
+
+###############################################################################
+# Data tier
+###############################################################################
+
+enable_dynamodb_pitr  = true
+dynamodb_billing_mode = "PAY_PER_REQUEST"
+
+# The most instructive option in this file and the most consequential.
+# Sub-second RPO, on a CloudWatch graph you can actually look at. Also
+# multi-active last-writer-wins with no conflict resolution beyond a
+# timestamp. Turn it on for lab step 6, read the variable description, decide.
+enable_dynamodb_global_table = false
+
+# OFF by default: ~$12.41/month single-AZ, ~$24.82 Multi-AZ, and 15-25 minutes
+# of wall clock to create. Turn it on only if you want the "Multi-AZ is not a
+# read replica" demonstration on real infrastructure — and budget the time.
+create_rds                = false
+rds_instance_class        = "db.t3.micro"
+rds_multi_az              = false
+rds_backup_retention_days = 1
+
+###############################################################################
+# S3 and replication
+###############################################################################
+
+enable_s3_replication = true
+
+# ~$0.015/GB on top of transfer and storage. Buys a 15-minute SLA and, more
+# importantly, a CloudWatch METRIC — which is the only way to answer "what is
+# my replication lag" and therefore the only way to state an RPO honestly.
+# This is the clearest example in the repo of paying for observability rather
+# than capability.
+s3_replication_time_control = false
+
+# The rule that stops versioning-plus-replication becoming an unbounded bill
+# in a region nobody looks at. Applied to BOTH buckets.
+s3_noncurrent_version_expiration_days = 30
+
+###############################################################################
+# DNS
+#
+# Both empty by default. The health check is still created ($0.50/month) —
+# health checks do not need a hosted zone. The failover RECORD SETS do.
+#
+# This stack deliberately does not create a hosted zone. A zone for a domain
+# you do not own resolves for nobody, bills $0.50/month, and survives teardown
+# because people do not think of zones as resources.
+###############################################################################
+
+hosted_zone_id  = ""
+dns_record_name = ""
+
+# 60 seconds. This is spent RTO: a resolver that fetched your record one
+# second before failover serves the old answer for this long. And it is a
+# request, not a guarantee — resolvers clamp, corporate DNS caches longer, and
+# the JVM historically cached for the life of the process.
+route53_ttl = 60
+
+enable_route53_health_check = true
+
+###############################################################################
+# Chaos and broken examples
+###############################################################################
+
+enable_chaos_lambda = true
+
+# Dry run by default. Run it dry FIRST, every time, and read the plan. The
+# blast radius is never quite what you assumed — which is exactly why you are
+# running a chaos exercise instead of reading a diagram.
+chaos_dry_run = true
+
+create_insecure_examples = true
+
+###############################################################################
+# Backup
+#
+# Everything here buys retention or copies. NONE of it buys a tested restore,
+# because nothing in a tfvars file can. That is a procedure, performed by a
+# person, timed with a clock — and it is check DR-010, which is CRITICAL for
+# exactly that reason.
+###############################################################################
+
+enable_backup_plan = true
+
+# Hourly, so a recovery point appears during the lab session. Daily is normal
+# in production, and daily means that at 04:59 you are 23h59m from your last
+# recovery point no matter what the DR document says. THE SCHEDULE IS THE RPO
+# CEILING.
+backup_schedule       = "cron(0 * * * ? *)"
+backup_retention_days = 7
+
+# The separate decision that everyone forgets is separate. A plan with no copy
+# action is complete, correct, green in the console, and regional.
+backup_copy_to_dr = true
+
+# GOVERNANCE MODE ONLY — this stack never sets changeable_for_days, because
+# that argument's PRESENCE is what selects the irreversible compliance mode.
+# Default false, so DR-009 fires twice (once per vault) against your own stack.
+enable_vault_lock = false
+
+###############################################################################
+# The recovery workflow
+#
+# Day 07: an automated response is a decision you are making now, to be
+# executed later, by nobody, on evidence that might be wrong.
+#
+# Day 07's automation contained a threat. This one declares a region dead, on
+# evidence from health checks, which lie during exactly the network conditions
+# that make you want to fail over.
+###############################################################################
+
+enable_recovery_workflow = true
+
+# Leave true until you have read one dry-run execution history end to end.
+recovery_dry_run = true
+
+# In-AZ recovery never needs approval (reversible by doing nothing). A regional
+# failover does. Both positions on this are defensible; an approval gate you
+# have never tested the response path for is not.
+require_approval_for_failover = true
+
+# THIS IS YOUR RTO WHEN APPROVAL IS REQUIRED — a ceiling, not an estimate.
+# 30 means your worst-case approved failover STARTS at minute 30.
+approval_timeout_minutes = 30
+
+# The brake. Flippable from a phone, no deploy, takes effect on the next
+# execution. Ship it "disabled" in production and enable it deliberately after
+# the first successful drill.
+kill_switch_default = "enabled"

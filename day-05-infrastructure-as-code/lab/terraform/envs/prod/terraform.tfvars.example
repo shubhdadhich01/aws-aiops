@@ -1,0 +1,70 @@
+###############################################################################
+# Day 05 — envs/prod/terraform.tfvars.example
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#   # edit backend.tf with your state bucket name, then:
+#   terraform init && terraform plan
+#
+# Read this file next to ../dev/terraform.tfvars.example. The differences are
+# the entire argument for directory-per-environment: they live in DATA, in two
+# files a human can diff, instead of in ternaries scattered through the code.
+###############################################################################
+
+# --- THE GATE ----------------------------------------------------------------
+# False by default. Flipping this to true builds a second complete copy of the
+# Day 05 stack: another VPC, another data bucket, another state file, another
+# .terraform/ cache. As configured below that costs about $0.02/month, because
+# everything in the default footprint is free. The expense is not the VPC — it
+# is that every toggle below is now a decision you make and pay for TWICE.
+enable_prod_environment = false
+
+aws_region  = "us-east-1"
+aws_profile = "bootcamp"
+
+# A team, not a person. People leave; resources tagged with a former
+# employee's name are how estates rot.
+owner = "platform-team"
+
+# --- Network -----------------------------------------------------------------
+# 10.30.0.0/16, deliberately NOT overlapping dev's 10.20.0.0/16. Overlapping
+# CIDRs are the single most common reason two VPCs can never be peered.
+vpc_cidr = "10.30.0.0/16"
+
+# Three AZs against dev's two. Same module, different data.
+public_subnets = {
+  "us-east-1a" = "10.30.1.0/24"
+  "us-east-1b" = "10.30.2.0/24"
+  "us-east-1c" = "10.30.3.0/24"
+}
+
+private_subnets = {
+  "us-east-1a" = "10.30.11.0/24"
+  "us-east-1b" = "10.30.12.0/24"
+  "us-east-1c" = "10.30.13.0/24"
+}
+
+# Real prod almost always needs this, and usually needs ONE PER AZ
+# (~$97.20/month for three) so an AZ failure does not take egress down
+# everywhere. False here because this is a bootcamp, not because prod is fine
+# without it.
+enable_nat_gateway = false
+
+# ~$0.50/month at lab traffic. Routinely three figures a month on a real
+# production VPC, and routinely worth it the first time somebody asks
+# "what talked to that host".
+enable_flow_logs = false
+
+# --- Compute -----------------------------------------------------------------
+# Empty so switching prod on does not silently start billing for compute.
+# A t3.small is ~$15.18/month on-demand.
+instances = {}
+
+# Prod instances belong in private subnets behind a load balancer, reached
+# with Session Manager. The honest default is false and staying false.
+associate_public_ip = false
+
+# --- Storage — note what prod turns on that dev does not ---------------------
+enable_versioning                  = true
+noncurrent_version_expiration_days = 90    # dev: 30
+create_data_table                  = false
+enable_point_in_time_recovery      = true  # dev: false. $0.20/GB-month.

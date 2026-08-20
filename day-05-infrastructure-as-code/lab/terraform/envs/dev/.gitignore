@@ -1,0 +1,32 @@
+# Day 05 — envs/dev/.gitignore
+
+# State. Should never be here at all — this directory uses the S3 backend —
+# but if `terraform init` is skipped, Terraform will happily write it locally.
+# IAC-003 checks that no .tfstate file is committed.
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform.tfstate.lock.info
+
+# Provider cache. Hundreds of MB per directory, machine-specific, regenerated
+# by `terraform init`. This is the day's orphaned-disk-space trap.
+.terraform/
+
+# Saved plans can contain sensitive values in the clear.
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+
+# Real variable values.
+terraform.tfvars
+*.auto.tfvars
+!terraform.tfvars.example
+
+# DELIBERATELY NOT IGNORED: .terraform.lock.hcl
+#
+# The dependency lock file records exact provider versions and their
+# checksums. Commit it — that is what makes `terraform init` reproducible for
+# your colleagues and in CI. `terraform init -upgrade` is the only thing that
+# should ever change it, and that change belongs in a reviewed PR.
+# IAC-012 fires on any .gitignore that throws it away.

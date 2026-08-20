@@ -1,0 +1,67 @@
+# Copy to terraform.tfvars and edit.
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# terraform.tfvars is gitignored — never commit it.
+
+aws_region  = "us-east-1"
+name_prefix = "cbc-day02"
+owner       = "your-name"
+
+# /16 gives you room. Do not overlap with your office network, your VPN, or any
+# VPC you might peer with later. Must be between /16 and /20.
+vpc_cidr = "10.20.0.0/16"
+
+# Two AZs minimum. One AZ is not high availability.
+az_count = 2
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 💸 THE EXPENSIVE SWITCH — read this before you apply
+# ─────────────────────────────────────────────────────────────────────────────
+# A NAT Gateway costs ~$0.045/hour (~$32.40/month) PLUS $0.045/GB processed.
+# It bills from the second it is created, idle or not. This is the first thing
+# in the bootcamp that costs real money.
+#
+#   true  → the full, realistic build. Destroy it at the end of the session.
+#   false → everything else still works; private subnets just have no outbound
+#           internet path. The assessment tool runs identically.
+#
+# If you are doing the lab across several evenings, set this false between
+# sessions rather than leaving it running overnight. Overnight ≈ $0.54.
+# A forgotten month ≈ $32.
+enable_nat_gateway = true
+
+# true  = one shared NAT (~$32/month, AZ is a single point of failure)
+# false = one NAT per AZ (~$32/month EACH — production pattern)
+# Keep true for the lab. The tool will flag the SPOF, and that finding is the point.
+single_nat_gateway = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Observability
+# ─────────────────────────────────────────────────────────────────────────────
+# Flow logs cost ~$0.50/GB ingested into CloudWatch. An idle lab VPC produces
+# single-digit MB per day. Keep this on — you cannot enable logging retroactively.
+enable_flow_logs         = true
+flow_logs_retention_days = 7
+
+# 💸 Interface endpoints (PrivateLink) cost ~$0.01/hour PER AZ, each.
+# Three services × two AZs ≈ $44/month. Leave false unless you want to see it.
+enable_interface_endpoints = false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security groups
+# ─────────────────────────────────────────────────────────────────────────────
+# Your own public IP as a /32. Find it with:
+#   curl -s https://checkip.amazonaws.com
+# Terraform will reject 0.0.0.0/0 here on purpose.
+trusted_admin_cidr = "203.0.113.10/32"
+
+app_port = 8080
+db_port  = 5432
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Training targets
+# ─────────────────────────────────────────────────────────────────────────────
+# Keep true: the Python assessment tool needs something to find. These resources
+# have no compute attached, so they cost $0 — but every one of them mirrors a
+# real breach pattern.
+create_insecure_examples = true

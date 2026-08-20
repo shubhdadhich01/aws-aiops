@@ -1,0 +1,102 @@
+###############################################################################
+# Day 03 — terraform.tfvars.example
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#   # edit `owner`, then:
+#   terraform init && terraform plan
+#
+# terraform.tfvars is gitignored. This example file is not.
+###############################################################################
+
+# --- Identity ---------------------------------------------------------------
+
+aws_region  = "us-east-1"
+aws_profile = "bootcamp"
+
+# Change this. It ends up on every resource and it is how you find your own
+# spend in Cost Explorer.
+owner = "bootcamp-student"
+
+# --- Network ----------------------------------------------------------------
+
+vpc_cidr = "10.30.0.0/16"
+
+# 2 is the minimum for high availability. 3 survives more and costs a little
+# more. 1 is not an option — the validation block rejects it.
+az_count = 2
+
+# COST: ~$32.40/month ($0.045/hour).
+# Needed for the userdata to install httpd. Leave it on for the lab, then
+# destroy. Turning it off to "save money" on a stack you delete this afternoon
+# is false economy — three hours of NAT is about $0.14.
+enable_nat_gateway = true
+
+# --- Compute ----------------------------------------------------------------
+
+# COST: $0.0104/hour each. Free-tier eligible for 750 h/month in year one.
+instance_type = "t3.micro"
+
+# COST: ~$7.49/month each. This is min_size AND desired_capacity.
+# 2 = one instance per AZ = survives an instance or AZ failure.
+# 1 = cheaper, and the chaos test will show a real outage. Educational once.
+instance_count = 2
+
+# Must be greater than instance_count or the scaling policies can never act.
+asg_max_size = 4
+
+# COST: $0.08/GB-month. 8 GB fits AL2023 plus a web server comfortably.
+root_volume_size_gb = 8
+
+# COST: ~$2.10/month. 1-minute metrics instead of 5-minute.
+# Leave this on for the lab or the scale-out demo takes 5 extra minutes to
+# become visible and everyone assumes it is broken.
+enable_detailed_monitoring = true
+
+# --- Scaling ----------------------------------------------------------------
+
+# Target tracking holds average CPU near this value.
+target_cpu_utilization = 50
+
+# New instances' metrics are ignored for this long. Set it to real
+# boot-to-healthy time + 30s. Measure it; do not guess.
+instance_warmup_seconds = 180
+
+# The ASG ignores health checks for this long after launch.
+# TOO SHORT = infinite launch/terminate loop that bills all night.
+health_check_grace_period = 300
+
+# --- Load balancing ---------------------------------------------------------
+
+# Leave empty for the teaching experience: HTTP only, which leaves findings
+# ASG-008 (no HTTPS listener) and ASG-009 (HTTP not redirecting) for the
+# auditor to catch.
+#
+# Set a real ACM cert ARN and you get the correct production shape:
+# HTTP:80 -> 301 -> HTTPS:443. Requires a domain you control.
+acm_certificate_arn = ""
+
+# Seconds to let in-flight requests finish before killing a draining target.
+# AWS defaults this to 300, which makes every deploy feel broken.
+alb_deregistration_delay = 30
+
+# COST: pennies. Ships ALB access logs to a purpose-created S3 bucket.
+enable_alb_access_logs = false
+
+# Who can reach the ALB. Narrow this to YOUR_IP/32 if you would rather the
+# internet did not find your lab.
+allowed_ingress_cidr = "0.0.0.0/0"
+
+# --- The deliberately broken bits -------------------------------------------
+
+# COST: ~$24/month extra (one more t3.micro + an idle NLB).
+#
+# true  -> creates a single-AZ ASG with EC2 health checks, a launch template
+#          with IMDSv1 and an unencrypted root volume, and an NLB with
+#          cross-zone disabled. ha_audit.py will find 10+ real issues.
+# false -> clean reference architecture, ~2 findings.
+#
+# Start with true. Run the auditor. Then flip to false and diff the plan —
+# that diff is the lesson.
+#
+# Never true in an account holding anything real.
+create_insecure_examples = true

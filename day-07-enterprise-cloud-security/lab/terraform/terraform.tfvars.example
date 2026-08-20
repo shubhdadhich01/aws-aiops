@@ -1,0 +1,138 @@
+###############################################################################
+# Day 07 — terraform.tfvars.example
+#
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored; this
+# example file is not.
+#
+#     cp terraform.tfvars.example terraform.tfvars
+#
+# Only ONE variable has no usable default: notification_email.
+#
+# Read the commented-out block below anyway. On this day some of the defaults
+# are not conveniences — they are the difference between a lab that costs three
+# dollars and one that costs several hundred, and each of those says so.
+###############################################################################
+
+###############################################################################
+# REQUIRED
+###############################################################################
+
+# Where security findings, and from CP2 every automated containment action, are
+# sent. Confirm the subscription BEFORE you enable automatic response — an
+# unconfirmed subscription means the automation can change your account and
+# nobody is told.
+notification_email = "you@example.com"
+
+###############################################################################
+# Identity & region — defaults are almost certainly fine
+###############################################################################
+
+# GuardDuty and Security Hub are REGIONAL services with account-level state.
+# Enabling them here does nothing for the other twenty-odd regions, which is
+# check SEC-002 and a genuinely common gap.
+# aws_region  = "us-east-1"
+# aws_profile = "bootcamp"
+# owner       = "bootcamp-student"
+
+###############################################################################
+# GuardDuty
+###############################################################################
+
+# Usage-based: ~$4.00 per million CloudTrail events, ~$1.00/GB of VPC flow and
+# DNS logs. FREE for 30 days per account per region. Set a budget alarm before
+# day 31 — the first real invoice is the one nobody plans for.
+# enable_guardduty = true
+
+# FIFTEEN_MINUTES, ONE_HOUR or SIX_HOURS. The AWS default is SIX_HOURS and it
+# controls how fast UPDATES to existing findings reach you — new findings are
+# published in about five minutes regardless. FIFTEEN_MINUTES costs nothing
+# extra; there is no reason not to.
+# guardduty_finding_publishing_frequency = "FIFTEEN_MINUTES"
+
+# ⚠️ ~$0.80 per million S3 data events. A bucket serving a few hundred reads a
+# second produces ~26 million events a day. Turn it on deliberately, on the
+# buckets that matter, after looking at your real volume. Never "just to be
+# safe" account-wide.
+# enable_guardduty_s3_protection = false
+
+###############################################################################
+# Security Hub
+###############################################################################
+
+# ~$0.0010 per security check, counted per control per resource per DAY. The
+# bill scales with your resource count, not with anything in this file.
+# enable_security_hub = true
+
+# ENABLE ONE. Enabling every standard on day one produces several thousand
+# failed controls across sets that overlap heavily, and a compliance percentage
+# nobody will ever drive to zero. A number nobody believes is worse than no
+# number, because the whole team learns to scroll past the dashboard.
+#
+# Add CIS or PCI when somebody actually needs the attestation, and budget real
+# time for suppressing controls that do not apply.
+# security_hub_standards = ["aws-foundational-security-best-practices"]
+
+###############################################################################
+# CloudTrail
+###############################################################################
+
+# Leave both TRUE. Multi-region because an attacker with credentials does not
+# politely operate in your primary region. Log file validation because it is
+# the difference between logging and EVIDENCE — it is what lets you prove
+# nobody edited the trail to remove their own activity. Both are free.
+# cloudtrail_multi_region               = true
+# cloudtrail_enable_log_file_validation = true
+
+# ⚠️ THE EXPENSIVE ONE. ~$0.10 per 100,000 data events with NO free allowance,
+# generated at application volume rather than human volume. One busy bucket is
+# ~26 million events/day, ~$26/day, ~$780/month.
+#
+# Enable them on the buckets whose contents you would have a breach-
+# notification obligation about, with an explicit selector, and nowhere else.
+# cloudtrail_enable_data_events = false
+
+# S3 lifecycle expiry for delivered objects. Check what you are obliged to keep
+# before shortening it — PCI DSS wants a year — and move old objects to Glacier
+# rather than lengthening it.
+# trail_log_retention_days = 90
+
+###############################################################################
+# Secrets Manager
+###############################################################################
+
+# ~$0.40 per secret per month. Two secrets here, so ~$0.80/month — the largest
+# predictable line item on this day.
+#
+# The interval is not the point. Rotation that WORKS AND IS VERIFIED is the
+# point: a secret rotating weekly whose rotation Lambda has been throwing since
+# March is worse than one rotating annually and checked, because the dashboard
+# says green. That is check SEC-011.
+# secret_rotation_days = 30
+
+# 7 to 30 days, or 0 for immediate and unrecoverable deletion. `destroy`
+# returns successfully and the secret still exists, scheduled — the same
+# surprise KMS gave you on Day 04. Do NOT set 0 in anything real.
+# secret_recovery_window_days = 7
+
+###############################################################################
+# Quarantine
+###############################################################################
+
+# Empty uses the default VPC, which is fine for a lab. In production this must
+# be the VPC your workloads actually run in — a quarantine security group in
+# the wrong VPC cannot be attached to anything, and you will find that out
+# during the incident.
+# quarantine_vpc_id = ""
+
+###############################################################################
+# The deliberately-broken examples
+###############################################################################
+
+# Leave true the first time through. sec_audit.py against a clean account
+# prints a green score and teaches nothing; the findings ARE the lesson.
+#
+# Note this one is not entirely free: it creates a SECOND CloudTrail delivering
+# management events, and only the first is free.
+#
+# Never set this true in an account that holds anything real.
+# create_insecure_examples = true

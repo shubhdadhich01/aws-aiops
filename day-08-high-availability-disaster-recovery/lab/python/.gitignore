@@ -1,0 +1,33 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+findings.json
+findings.csv
+
+# Day 08 addition. Three kinds of export this tool produces that should not
+# reach a repository, and one that should.
+#
+# A DR FINDINGS EXPORT is an inventory of exactly which of your recovery paths
+# do not work, with resource ids attached. It is also, more specifically than
+# most audit output, a schedule: it tells a reader when your last recovery
+# point was taken and therefore how long they have before a restore becomes
+# cheap for you.
+#
+# RESTORE AND BACKUP JOB LISTINGS carry the same information in rawer form.
+#
+# CHAOS AND WORKFLOW EXECUTION OUTPUT contains instance ids, subnet ids and
+# NACL association ids — a map of what to break and how.
+#
+# WHAT SHOULD BE COMMITTED, and is deliberately not ignored: rto-measurements.md.
+# Your measured RTO and RPO, dated. It is the single most valuable artefact
+# this day produces, and an RTO without a date is an RTO from an architecture
+# that no longer exists.
+dr-findings.json
+dr-findings-*.json
+dr-audit-*.json
+restore-*.json
+snapshots-*.json
+backup-jobs-*.json
+chaos-*.json
+execution-history-*.json
+failover-evidence/

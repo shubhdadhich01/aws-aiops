@@ -1,0 +1,121 @@
+###############################################################################
+# Day 04 — terraform.tfvars.example
+#
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored; this
+# example file is not.
+#
+#     cp terraform.tfvars.example terraform.tfvars
+#
+# Only ONE variable has no usable default: notification_email. Set it or the
+# apply fails validation immediately, which is deliberate — a compliance
+# scanner with nowhere to send findings is a cron job that burns CPU.
+###############################################################################
+
+###############################################################################
+# REQUIRED
+###############################################################################
+
+# Where compliance findings are emailed. You will receive a confirmation link
+# within seconds of `terraform apply` and the subscription does NOTHING until
+# you click it.
+notification_email = "you@example.com"
+
+###############################################################################
+# Identity & region — defaults are almost certainly fine
+###############################################################################
+
+# aws_region  = "us-east-1"
+# aws_profile = "bootcamp"
+# owner       = "bootcamp-student"
+
+###############################################################################
+# Cost control
+#
+# Day 04 total: ~$1.01/month, of which $1.00 is the KMS key below.
+###############################################################################
+
+# The only real line item on this day's bill. Set to false to run the entire
+# lab for approximately one cent, falling back to AWS-managed keys.
+#
+# Leave it true the first time. The point of the dollar is learning why a
+# customer-managed key is worth it: key policy control, an auditable
+# CloudTrail Decrypt event naming the caller, and revocable grants.
+# enable_kms_encryption = true
+
+# Mandatory AWS waiting period before a KMS key is actually deleted. 7 is the
+# minimum allowed and the right choice for a lab.
+# kms_deletion_window_days = 7
+
+###############################################################################
+# Lambda
+###############################################################################
+
+# lambda_runtime         = "python3.12"
+# lambda_memory_mb       = 256
+# lambda_timeout_seconds = 60
+
+# ⚠️ The runaway-bill guard. -1 means unreserved (AWS default) and lets this
+# function scale to your account concurrency limit. 2 is plenty for a lab and
+# makes an infinite loop physically impossible.
+# lambda_reserved_concurrency = 2
+
+# Set to 0 to make the DLQ test in Step 5 land immediately instead of waiting
+# out the retry backoff.
+# lambda_max_retry_attempts = 1
+
+# enable_xray_tracing = true
+
+###############################################################################
+# Logging — the silent cost growth guard
+###############################################################################
+
+# CloudWatch Logs retention in days. Never leave a Lambda log group on
+# "Never expire" — that is the most common orphaned line item on an AWS bill.
+# log_retention_days = 14
+
+###############################################################################
+# Scheduling
+###############################################################################
+
+# How often the full-account sweep runs. Free at any sane frequency. During the
+# lab you invoke by hand rather than waiting.
+# schedule_expression = "rate(1 hour)"
+
+# Set false to study the reactive path in isolation. A disabled rule is
+# check CMP-014.
+# enable_scheduled_scan = true
+
+###############################################################################
+# What the scanner enforces
+###############################################################################
+
+# Tag keys treated as mandatory on EC2 instances, S3 buckets and security
+# groups. Matches the repo-wide convention from Day 01.
+# required_tag_keys = ["Project", "Owner", "ManagedBy"]
+
+# Minimum severity that triggers an email. LOW during the lab so you actually
+# see mail; raise it in production or people learn to ignore the topic.
+# scan_severity_threshold = "LOW"
+
+###############################################################################
+# The deliberately broken examples
+###############################################################################
+
+# true  = build the misconfigured resources so serverless_audit.py has real
+#         findings (13+ across CMP-001 to CMP-016). This is the teaching path.
+# false = clean-architecture reference build. Step 7 of the lab has you flip
+#         this and diff the plan.
+#
+# NEVER set this true in an account that holds anything real — the broken role
+# grants administrator access to a function whose source is in a public repo.
+# create_insecure_examples = true
+
+###############################################################################
+# Cheaper mode, if you must leave it up
+###############################################################################
+#
+#   enable_kms_encryption = false   -> saves $1.00/month, leaves ~$0.01
+#
+# There is nothing else to switch off. Everything else is already free.
+# The correct move is still `terraform destroy` when you finish.
+###############################################################################

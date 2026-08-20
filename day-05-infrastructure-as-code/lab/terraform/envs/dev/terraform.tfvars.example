@@ -1,0 +1,69 @@
+###############################################################################
+# Day 05 — envs/dev/terraform.tfvars.example
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#   # edit backend.tf with your state bucket name, then:
+#   terraform init && terraform plan && terraform apply
+#
+# terraform.tfvars is GITIGNORED and terraform.tfvars.example is committed.
+# The auditor reads BOTH looking for hardcoded secrets (IAC-001), because
+# "I only put the password in tfvars" stops being a mitigation the first time
+# somebody runs `git add -A`.
+#
+# Precedence reminder, highest wins:
+#   -var / -var-file  >  *.auto.tfvars  >  terraform.tfvars  >  TF_VAR_*  >  default
+# Yes, TF_VAR_ env vars lose to terraform.tfvars. That surprises everyone once.
+###############################################################################
+
+aws_region  = "us-east-1"
+aws_profile = "bootcamp"
+owner       = "your-name-here"
+
+# --- Network -----------------------------------------------------------------
+vpc_cidr = "10.20.0.0/16"
+
+public_subnets = {
+  "us-east-1a" = "10.20.1.0/24"
+  "us-east-1b" = "10.20.2.0/24"
+}
+
+private_subnets = {
+  "us-east-1a" = "10.20.11.0/24"
+  "us-east-1b" = "10.20.12.0/24"
+}
+
+# ~$32.40/month + $0.045/GB. The most expensive toggle in the bootcamp.
+# Dev does not need it: nothing in the dev private subnets makes outbound calls.
+enable_nat_gateway = false
+
+# ~$0.50/month at lab traffic levels.
+enable_flow_logs = false
+
+# --- Compute -----------------------------------------------------------------
+# Empty = $0.00. Uncomment to watch the dependency graph do something.
+# One t3.micro is ~$7.59/month on-demand (free for 750 h/month in the first
+# 12 months of a new account, one instance only).
+instances = {}
+
+# instances = {
+#   "web-a" = {
+#     instance_type     = "t3.micro"
+#     availability_zone = "us-east-1a"
+#     root_volume_gb    = 8
+#   }
+# }
+
+# ~$3.65/month EACH, charged since Feb 2024 whether traffic flows or not.
+# The compute module enables Session Manager, so you rarely want this.
+associate_public_ip = false
+
+# --- Storage -----------------------------------------------------------------
+enable_versioning                  = true
+noncurrent_version_expiration_days = 30
+create_data_table                  = false
+
+# --- Deliberately broken -----------------------------------------------------
+# Creates a second, misconfigured "state" bucket (no versioning, no
+# encryption, public access still blocked) so IAC-006 and IAC-007 have
+# something real to find. Costs ~$0.00.
+create_insecure_examples = true

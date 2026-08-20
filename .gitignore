@@ -1,0 +1,64 @@
+# ─── Terraform / OpenTofu ────────────────────────────────────────────────
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+
+# Local override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Real tfvars (keep .example checked in)
+*.tfvars
+!*.tfvars.example
+*.tfvars.json
+!*.tfvars.example.json
+
+# Plan artifacts
+*.tfplan
+*.tfplan.json
+
+# ─── Python ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+env/
+.env
+
+# ─── AWS / secrets ───────────────────────────────────────────────────────
+.aws/
+credentials
+*.pem
+*.pfx
+*.p12
+*.key
+*_rsa
+*_dsa
+
+# ─── OS & editor cruft ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ─── Build / packaging ───────────────────────────────────────────────────
+dist/
+build/
+*.zip
+!docs/**/*.zip

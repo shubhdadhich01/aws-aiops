@@ -1,0 +1,36 @@
+# bad-examples/.gitignore
+#
+#                    ██  WRONG ON PURPOSE  ██
+#
+# FAULTS IN THIS FILE:
+#   IAC-012  .terraform.lock.hcl is gitignored               MEDIUM
+
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform.tfvars
+
+# IAC-012 — throwing away the dependency lock file.
+#
+# This one line is the fault. It looks like tidiness and it is the opposite.
+#
+# .terraform.lock.hcl records the EXACT provider versions Terraform selected
+# and their checksums for every platform. Committing it is what makes
+# `terraform init` reproducible: your laptop, your colleague's laptop and CI
+# all get the same provider binary, verified against the same hashes.
+#
+# Ignore it and every `terraform init` re-resolves against the registry. The
+# pipeline picks up a provider released three hours ago, and the plan shows
+# changes nobody wrote — usually a new attribute with a new default. You will
+# spend the morning proving it was not your commit.
+#
+# It also removes the supply-chain check. The hashes are how Terraform
+# verifies the provider it downloaded is the provider it downloaded last
+# time.
+#
+# `terraform init -upgrade` is the only thing that should ever change this
+# file, and that change belongs in its own reviewed pull request where a
+# human can see "aws 5.80.0 -> 5.82.2" and think about it.
+#
+# Day 04's terraform/.gitignore had this exact line. It was wrong there too.
+.terraform.lock.hcl

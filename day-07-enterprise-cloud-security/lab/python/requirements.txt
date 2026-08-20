@@ -1,0 +1,21 @@
+# Day 07 — sec_audit.py dependencies
+#
+# boto3 is the only hard requirement, and as on Day 06 it is needed for ALL
+# sixteen checks. Nothing this tool looks for is visible in the Terraform.
+#
+#   pip install -r requirements.txt
+#
+# Eight AWS clients, which is more than any previous day, and that spread is
+# the point rather than an accident: security posture is not a service, it is
+# the relationship between guardduty, securityhub, cloudtrail, s3,
+# secretsmanager, iam, lambda and events. A tool that reads one of them tells
+# you about one of them.
+#
+# The unit tests need nothing beyond the standard library. Every check is a
+# pure function over a plain dict — including the clock, which is injected as
+# stack["now"] rather than read from datetime.now(). Three checks here are
+# age-based, and a check that reads the clock itself is a check whose tests
+# pass or fail depending on when CI ran.
+
+boto3>=1.34.0
+botocore>=1.34.0

@@ -1,0 +1,64 @@
+###############################################################################
+# Day 09 — terraform.tfvars.example
+#
+# Copy to terraform.tfvars and edit. The one variable you MUST set is
+# notification_email; every other variable has a defensible default.
+#
+# Read the top of variables.tf before changing anything else — most of the
+# defaults are deliberately permissive, so the auditor's Static-State-A
+# findings are honest against your own stack. The lab flips them off one
+# by one and re-runs the audit.
+###############################################################################
+
+# REQUIRED — set this. There is no default.
+notification_email = "you@example.com"
+
+# RECOMMENDED — tag your resources with your name so cost reports attribute.
+# The default "bootcamp-student" is deliberately terrible.
+owner = "your-name-here"
+
+###############################################################################
+# The permissive defaults — the shape of a Day-1 account
+#
+# Leave these commented out to see the shipped Static-State-A findings.
+# The lab walks you through turning them on one at a time and re-running
+# the audit.
+###############################################################################
+
+# The audit's test bench. Leave true for the first run; the auditor's
+# Static-State-A output will match the finding contract. Set to false BEFORE
+# you go to bed, and DEFINITELY before you go on holiday.
+# create_insecure_examples = true
+
+# create_insecure_examples = false          # -> COST-005, COST-006, COST-009,
+#                                                COST-010, COST-011, COST-013
+#                                                stop firing
+# enable_budget                = true       # -> COST-001 stops firing
+# enable_cost_anomaly_monitor  = true       # -> COST-003 stops firing (a
+#                                                monitor also enables COST-016
+#                                                to observe anomalies for
+#                                                triage)
+# enable_bucket_lifecycle      = true       # -> COST-014 stops firing
+# enable_vpc_endpoints         = true       # -> COST-012 stops firing
+# log_retention_days           = 30         # -> the app log group has retention
+
+###############################################################################
+# The expensive optional — the NAT gateway
+###############################################################################
+
+# NAT costs ~$32.85/month. Off by default. Turning it on lets you see
+# COST-012 (a NAT gateway with no S3/DynamoDB gateway endpoints) fire, then
+# turning on enable_vpc_endpoints watches it stop.
+# enable_nat_gateway = true
+
+###############################################################################
+# Age thresholds — override to make the auditor stricter (or more permissive)
+###############################################################################
+
+# volume_orphan_days             = 7
+# eip_orphan_days                = 7
+# snapshot_retention_days        = 90
+# instance_stopped_days          = 30
+# long_running_instance_days     = 30
+# anomaly_triage_days            = 7
+# tag_coverage_threshold_percent = 90

@@ -1,0 +1,30 @@
+# Day 06 — obs_audit.py dependencies
+#
+# boto3 is the only hard requirement, and unlike Day 05 it is needed for ALL
+# sixteen checks. That is not a regression, it is the subject changing.
+#
+#   pip install -r requirements.txt
+#
+# Day 05 could answer most of its questions by reading .tf files, because the
+# faults it looks for are written down: a hardcoded secret is in the file, an
+# unpinned provider is in the file. Nothing Day 06 looks for is.
+#
+#   * Whether a dashboard points at a metric that exists depends on what has
+#     been PUBLISHED, which no configuration states.
+#   * Whether an alarm is stuck in INSUFFICIENT_DATA depends on whether data
+#     ever arrived.
+#   * Whether a metric filter dimension has exploded into forty thousand
+#     custom metrics depends on the traffic, not the filter.
+#   * Whether model invocation logging is on is an account-level setting that
+#     any of several stacks might own.
+#
+# A static auditor tells you what you WROTE. A live one tells you what you
+# HAVE. You want both, and by Day 10 you will have both.
+#
+# The unit tests need nothing beyond the standard library. Every check is a
+# pure function over a plain dict, so tests/test_checks.py runs with no
+# credentials, no account and no network — which is why there are 47 of them
+# and they finish in under a second.
+
+boto3>=1.34.0
+botocore>=1.34.0

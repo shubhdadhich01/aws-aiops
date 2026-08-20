@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+findings.json
+findings.csv
+
+# Day 07 addition. A findings export is a reconnaissance report you wrote for
+# an attacker: account id, instance ids, VPC layout, principal names, and a
+# list of which of your controls are currently failing.
+securityhub-*.json
+guardduty-*.json
+secret-*.json
+*.credentials

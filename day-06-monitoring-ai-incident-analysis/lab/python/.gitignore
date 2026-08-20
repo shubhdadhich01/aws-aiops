@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+findings.json
+findings.csv
+
+# Day 06 addition: anything you pulled out of CloudWatch to look at by hand,
+# and anything a model wrote about it. Both contain log content. See the note
+# in lab/terraform/.gitignore — the reasoning is the same one OBS-011 is about.
+logs/
+log-samples/
+*.log
+summary-*.json
+summary-*.txt
+prompt-*.txt

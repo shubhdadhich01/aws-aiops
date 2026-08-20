@@ -1,0 +1,24 @@
+# Day 05 — iac_audit.py dependencies
+#
+# boto3 is the only hard requirement, and it is only needed for the four LIVE
+# checks (IAC-004, IAC-006, IAC-007, IAC-015). The twelve static checks parse
+# .tf files with nothing but the standard library — argparse, csv, fnmatch,
+# json, os, re, dataclasses.
+#
+#   pip install -r requirements.txt
+#
+# NOTE THE ABSENCE OF python-hcl2. That is deliberate, not an oversight. HCL is
+# parsed here with `re` and a small hand-written brace scanner, because a
+# linter you can run on a locked-down bastion beats a perfect parser you cannot
+# install. The machines where this matters most — the jump host with no egress,
+# the CI runner with a locked requirements file — are exactly the machines
+# where `pip install python-hcl2` fails. The module docstring is explicit about
+# what that choice costs: nested heredocs, interpolated attribute names and
+# dynamic blocks are all false negatives.
+#
+# The unit tests need nothing beyond the standard library either — every check
+# is a pure function over a TerraformDirectory or a plain dict, so
+# tests/test_checks.py runs with no credentials, no account and no network.
+
+boto3>=1.34.0
+botocore>=1.34.0

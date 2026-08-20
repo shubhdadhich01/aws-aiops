@@ -1,0 +1,9 @@
+# Day 03 — ha_audit.py dependencies
+#
+# boto3 is the only hard requirement. Everything else in the tool is standard
+# library (argparse, csv, json, dataclasses) on purpose: an audit tool you can
+# copy onto a bastion and run with nothing installed is worth more than one
+# with a beautiful dependency tree.
+
+boto3>=1.34.0
+botocore>=1.34.0

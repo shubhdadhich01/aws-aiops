@@ -1,0 +1,14 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# Your actual variables — never commit these
+terraform.tfvars
+*.auto.tfvars
+
+# Keep the example
+!terraform.tfvars.example

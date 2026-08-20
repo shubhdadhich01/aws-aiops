@@ -1,0 +1,26 @@
+# Day 08 — dr_audit.py dependencies
+#
+# boto3 is the only hard requirement, and as on Days 06 and 07 it is needed for
+# ALL sixteen checks. Nothing this tool looks for is visible in the Terraform:
+# a plan can show you a backup vault and cannot show you whether it holds
+# anything, and no plan in the world can show you whether anybody has ever
+# restored from it.
+#
+#   pip install -r requirements.txt
+#
+# NINE AWS clients, and — new on this day — TWO REGIONS. The DR-region clients
+# are not optional decoration: a single-region audit of a multi-region DR
+# posture cannot see whether the copy vault exists, whether it holds anything,
+# or whether it is in the region you think it is. That last one is check
+# DR-011, and it is the reason the collector resolves regions from ARNs and
+# from get_bucket_location rather than trusting resource names.
+#
+# The unit tests need nothing beyond the standard library. Every check is a
+# pure function over a plain dict — including the clock, which is injected as
+# stack["now"] rather than read from datetime.now(). Three checks here are
+# age-based, and one of them (DR-008) exists specifically to demonstrate that
+# an unchanged account's audit result changes with the clock alone. That lesson
+# is only demonstrable in a test if the clock is a value you can set.
+
+boto3>=1.34.0
+botocore>=1.34.0

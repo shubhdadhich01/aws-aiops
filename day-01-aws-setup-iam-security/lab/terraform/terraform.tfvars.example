@@ -1,0 +1,24 @@
+# Copy to terraform.tfvars and edit.
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# terraform.tfvars is gitignored — never commit it.
+
+aws_region  = "us-east-1"
+name_prefix = "cbc-day01"
+owner       = "your-name"
+
+# ⚠️ REQUIRED — you must confirm the SNS subscription email AWS sends here.
+alert_email = "you@example.com"
+
+# Pick a number that would genuinely annoy you if you hit it.
+budget_limit_usd = "10"
+
+# Keep true: the Python audit tool needs something to find.
+create_bad_policy = true
+
+# CIS benchmark recommends 14+.
+min_password_length   = 14
+max_password_age_days = 90
+
+# Region-lock the developer policy. Add more only if you truly need them.
+allowed_regions = ["us-east-1"]
