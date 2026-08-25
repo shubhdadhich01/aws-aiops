@@ -1,76 +1,44 @@
-output "account_id" {
-  description = "The AWS account these resources were created in."
-  value       = data.aws_caller_identity.current.account_id
+output "day1_security_audit_role_arn" {
+  description = "Role used by the Python auditor for read-only IAM inspection."
+  value       = local.security_audit_role_arn
 }
 
-output "developers_group_name" {
-  description = "Name of the developers IAM group."
-  value       = aws_iam_group.developers.name
+output "day1_aiops_runner_role_arn" {
+  description = "EC2 instance role; it may only assume the Day 01 security-audit role."
+  value       = aws_iam_role.aiops_runner.arn
 }
 
-output "readonly_group_name" {
-  description = "Name of the read-only IAM group."
-  value       = aws_iam_group.readonly.name
+output "day1_aiops_runner_instance_id" {
+  description = "EC2 instance ID hosting Python + Ollama + Qwen3."
+  value       = aws_instance.aiops_runner.id
 }
 
-output "developer_policy_arn" {
-  description = "ARN of the least-privilege developer policy."
-  value       = aws_iam_policy.developer.arn
+output "day1_aiops_runner_public_ip" {
+  description = "Public IP of the AIOps EC2 runner. SSH is restricted by allowed_ssh_cidr."
+  value       = aws_instance.aiops_runner.public_ip
 }
 
-output "audit_role_arn" {
-  description = "ARN of the security audit role. Assume this to run the Python audit tool."
-  value       = aws_iam_role.security_audit.arn
+output "day1_aiops_runner_ssh" {
+  description = "Example SSH command for the AIOps runner."
+  value       = "ssh ec2-user@${aws_instance.aiops_runner.public_ip}"
 }
 
-output "budget_name" {
-  description = "Name of the monthly cost budget."
-  value       = aws_budgets_budget.monthly.name
+output "day1_ollama_model" {
+  description = "Ollama model bootstrapped on the AIOps runner."
+  value       = var.ollama_model
 }
 
-output "budget_sns_topic_arn" {
-  description = "SNS topic that receives budget notifications."
-  value       = aws_sns_topic.budget_alerts.arn
+output "day1_ollama_endpoint" {
+  description = "Ollama endpoint; intentionally local to the EC2 instance."
+  value       = "http://127.0.0.1:11434"
 }
 
-output "bad_policy_arn" {
-  description = "ARN of the deliberately over-permissive policy (training target for the audit tool)."
-  value       = var.create_bad_policy ? aws_iam_policy.bad_example[0].arn : "not created"
+output "day1_bad_policy_arn" {
+  description = "Deliberately insecure customer-managed policy used as an audit fixture."
+  value       = var.create_bad_policy ? aws_iam_policy.bad_example[0].arn : null
 }
 
-output "bad_role_arn" {
-  description = "ARN of the deliberately open-trust role (training target for the audit tool)."
-  value       = var.create_bad_policy ? aws_iam_role.bad_example[0].arn : "not created"
-}
-
-output "audit_profile_snippet" {
-  description = "Append this to ~/.aws/config to create a role-assumption profile."
-  value       = <<-EOT
-
-    [profile bootcamp-audit]
-    role_arn         = ${aws_iam_role.security_audit.arn}
-    source_profile   = bootcamp
-    region           = ${var.aws_region}
-    duration_seconds = 3600
-    # If you enabled the MFA condition in the trust policy, uncomment and set:
-    # mfa_serial     = arn:aws:iam::${data.aws_caller_identity.current.account_id}:mfa/YOUR_USERNAME
-  EOT
-}
-
-output "next_steps" {
-  description = "What to do now."
-  value       = <<-EOT
-
-    ✅ Terraform applied.
-
-    1. Confirm the SNS subscription email AWS just sent to ${var.alert_email}
-    2. Append the audit profile to your AWS config:
-         terraform output -raw audit_profile_snippet >> ~/.aws/config
-    3. Test role assumption:
-         aws sts get-caller-identity --profile bootcamp-audit
-    4. Run the audit tool:
-         cd ../python && python3 iam_audit.py --profile bootcamp
-    5. When finished for the day:
-         terraform destroy
-  EOT
+output "day1_bad_role_name" {
+  description = "Deliberately insecure open-trust role used as an audit fixture."
+  value       = var.create_bad_policy ? aws_iam_role.bad_example[0].name : null
 }
