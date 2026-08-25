@@ -413,6 +413,7 @@ Findings:
     payload = json.dumps({
         "model": model_id,
         "stream": False,
+        "think": False,
         "messages": [{"role": "user", "content": prompt}],
         "options": {"temperature": 0.2},
     }).encode("utf-8")
