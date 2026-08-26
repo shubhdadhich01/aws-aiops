@@ -388,34 +388,70 @@ def anomaly_check(r, path):
 # The LLM receives sanitized findings only. It correlates, prioritizes and
 # proposes investigation/remediation order; it does not modify AWS.
 def ai_triage(r, ollama_url, model_id):
-    # IMPORTANT: this LLM stage receives sanitized audit findings, not credentials
-    # and not raw secret values. Its job is investigation/triage, not AWS mutation.
-    # It correlates findings, prioritizes them, and proposes hypotheses for review.
-    findings = [
-        {"check_id": f.check_id, "severity": f.severity, "resource": f.resource,
-         "title": f.title, "detail": f.detail}
+    """Use a local LLM for incident analysis, not security detection."""
+    # Only send important findings. The deterministic rule engine has already
+    # scanned the account; the LLM should not receive hundreds of low-value items.
+    important = [
+        {
+            "check_id": f.check_id,
+            "severity": f.severity,
+            "resource": f.resource,
+            "title": f.title,
+            "detail": f.detail,
+        }
         for f in r.findings
-    ]
+        if f.severity in {"CRITICAL", "HIGH"}
+    ][:10]
 
-    # The prompt explicitly limits the model to supplied evidence so the exercise
-    # teaches grounded analysis rather than asking the model to invent AWS state.
-    prompt = f"""You are an AWS operations-security analyst.
-Analyze this sanitized IAM audit. Use only supplied evidence. Do not invent facts.
-Return: executive assessment, top 3 priorities, related findings/root-cause hypotheses,
-remediation order, and changes requiring human approval.
-Score: {r.score()}/100
-Counts: {json.dumps(r.counts())}
+    if not important:
+        return {
+            "status": "no_ai_triage_needed",
+            "message": "No CRITICAL or HIGH findings were detected.",
+        }
+
+    # Keep the prompt compact. Qwen3:1.7b is running locally on a CPU-based EC2,
+    # so sending only the high-signal findings keeps the demo responsive.
+    prompt = f"""You are an AWS operations-security incident analyst.
+The deterministic IAM audit has already identified the following important findings.
+Do NOT re-evaluate whether the findings are valid and do NOT invent new AWS facts.
+Your job is to correlate them, explain their operational impact, prioritize investigation,
+and suggest a remediation sequence. Mark actions that require human approval.
+
+Security score: {r.score()}/100
+Severity counts: {json.dumps(r.counts())}
 Historical anomaly: {json.dumps(r.anomaly)}
-Findings:
-{json.dumps(findings, indent=2)}"""
+Important findings:
+{json.dumps(important, indent=2)}"""
 
-    # Ollama exposes a local HTTP API. Using urllib keeps the Python dependency list small.
+    # Ollama supports JSON-schema structured outputs. This is more reliable than
+    # asking a small local model to follow a prose-only output format.
+    schema = {
+        "type": "object",
+        "properties": {
+            "incident_summary": {"type": "string"},
+            "priority": {"type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]},
+            "related_findings": {"type": "array", "items": {"type": "string"}},
+            "investigation_order": {"type": "array", "items": {"type": "string"}},
+            "remediation_sequence": {"type": "array", "items": {"type": "string"}},
+            "human_approval_required": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": [
+            "incident_summary",
+            "priority",
+            "related_findings",
+            "investigation_order",
+            "remediation_sequence",
+            "human_approval_required",
+        ],
+    }
+
     payload = json.dumps({
         "model": model_id,
         "stream": False,
         "think": False,
+        "format": schema,
         "messages": [{"role": "user", "content": prompt}],
-        "options": {"temperature": 0.2},
+        "options": {"temperature": 0, "num_predict": 160},
     }).encode("utf-8")
 
     request = urllib.request.Request(
@@ -424,13 +460,31 @@ Findings:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Could not connect to Ollama at {ollama_url}: {exc}") from exc
 
-    return result.get("message", {}).get("content", "No AI response returned.")
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        raise RuntimeError(
+            f"Ollama returned HTTP {exc.code} from {ollama_url}: {body}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"Could not connect to Ollama at {ollama_url}: {exc}"
+        ) from exc
+    except TimeoutError as exc:
+        raise RuntimeError(f"Ollama request timed out after 60 seconds: {exc}") from exc
+
+    content = result.get("message", {}).get("content", "")
+    if not content:
+        raise RuntimeError("Ollama returned an empty AI response")
+
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        # Keep the raw answer rather than failing the entire security audit.
+        return {"status": "unstructured_response", "raw_response": content}
 
 # =============================================================================
 # 12. REPORTING
@@ -448,7 +502,9 @@ def print_report(r, min_severity):
         for f in r.findings:
             if f.severity == s: print(f"[{f.check_id}] {f.title}\n  {f.resource}\n  {f.detail}\n  Fix: {f.remediation}\n")
     if r.anomaly: print("--- AIOPS ANOMALY ---\n" + json.dumps(r.anomaly, indent=2))
-    if r.ai_summary: print("\n--- AIOPS AI TRIAGE ---\n" + r.ai_summary)
+    if r.ai_summary:
+        print("\n--- AIOPS GENAI TRIAGE ---")
+        print(json.dumps(r.ai_summary, indent=2, default=str) if isinstance(r.ai_summary, dict) else r.ai_summary)
 
 def write_reports(r, out_dir, fmt):
     # Machine-readable reports make the audit useful outside the terminal:
@@ -468,6 +524,7 @@ def write_reports(r, out_dir, fmt):
 
 # =============================================================================
 # 13. CLI + MAIN ORCHESTRATOR
+# --anomaly enables the historical detector; --ai enables the local Ollama triage layer.
 # =============================================================================
 # main() only wires the sections together. The audit logic stays in the
 # smaller functions above so each section can be taught independently.
@@ -479,7 +536,7 @@ def main():
     p.add_argument("--max-key-age", type=int, default=90); p.add_argument("--min-severity", choices=SEVERITY, default="LOW")
     p.add_argument("--format", choices=["table", "json", "csv", "all"], default="table"); p.add_argument("--output-dir", default="reports")
     p.add_argument("--anomaly", action="store_true"); p.add_argument("--history-file", default="reports/iam_history.json")
-    p.add_argument("--ai", action="store_true"); p.add_argument("--model-id", default=os.getenv("AIOPS_MODEL_ID", "qwen3:8b")); p.add_argument("--ollama-url", default=os.getenv("OLLAMA_URL", "http://localhost:11434")); p.add_argument("--fail-on", choices=SEVERITY)
+    p.add_argument("--ai", action="store_true"); p.add_argument("--model-id", default=os.getenv("AIOPS_MODEL_ID", "qwen3:1.7b")); p.add_argument("--ollama-url", default=os.getenv("OLLAMA_URL", "http://localhost:11434")); p.add_argument("--fail-on", choices=SEVERITY)
     a = p.parse_args()
     try:
         session = boto3.Session(profile_name=a.profile, region_name=a.region); identity = session.client("sts").get_caller_identity(); iam = session.client("iam")
