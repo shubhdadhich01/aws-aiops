@@ -9,6 +9,8 @@ exec > >(tee /var/log/cbc-day01-user-data.log | logger -t cbc-day01-user-data -s
 dnf update -y
 dnf install -y git python3 python3-pip
 
+python3 -m pip install "boto3>=1.34.0" "botocore>=1.34.0"
+
 mkdir -p /opt/cbc-day01
 chown ec2-user:ec2-user /opt/cbc-day01
 
@@ -44,12 +46,8 @@ sudo -u ec2-user ollama pull '${ollama_model}'
 if [ -n '${git_repository_url}' ]; then
   rm -rf /opt/cbc-day01/app
   sudo -u ec2-user git clone --branch '${git_branch}' '${git_repository_url}' /opt/cbc-day01/app
-
-  if [ -f /opt/cbc-day01/app/day-01-aws-setup-iam-security/lab/python/requirements.txt ]; then
-    sudo -u ec2-user python3 -m venv /opt/cbc-day01/venv
-    sudo -u ec2-user /opt/cbc-day01/venv/bin/pip install --upgrade pip
-    sudo -u ec2-user /opt/cbc-day01/venv/bin/pip install -r /opt/cbc-day01/app/day-01-aws-setup-iam-security/lab/python/requirements.txt
-  fi
+  sudo -u ec2-user python3 -m venv /opt/cbc-day01/venv
+  sudo -u ec2-user /opt/cbc-day01/venv/bin/pip install --upgrade pip
 fi
 
 # -----------------------------------------------------------------------------
