@@ -388,28 +388,21 @@ def anomaly_check(r, path):
 # The LLM receives sanitized findings only. It correlates, prioritizes and
 # proposes investigation/remediation order; it does not modify AWS.
 def ai_triage(r, ollama_url, model_id):
-    """Use Llama 3.2 1B for incident analysis, never for the authoritative finding decision."""
-    # The deterministic IAM engine remains the source of truth.
-    # The LLM receives only the most important findings and adds:
-    #   - resource-specific explanation
-    #   - impact/context
-    #   - investigation order
-    #   - remediation sequence
-    #   - human approval requirements
-    # This keeps the prompt small enough for a local 1B model.
+    """Use Llama only for incident analysis, not security detection."""
+    # Keep the local LLM workload small. The Python rule engine remains the source
+    # of truth; Llama explains and prioritizes only the two most important findings.
     important = [
         {
-            "check_id": f.check_id,
+            "check": f.check_id,
             "severity": f.severity,
-            "resource_type": f.resource_type,
-            "resource_name": f.resource_name,
-            "title": f.title,
-            "detail": f.detail[:300],
-            "remediation": f.remediation[:300],
+            "type": f.resource_type,
+            "resource": f.resource_name,
+            "problem": f.detail[:180],
+            "fix": f.remediation[:180],
         }
         for f in r.findings
         if f.severity in {"CRITICAL", "HIGH"}
-    ][:5]
+    ][:2]
 
     if not important:
         return {
@@ -419,89 +412,47 @@ def ai_triage(r, ollama_url, model_id):
             "findings": [],
             "investigation_order": [],
             "remediation_plan": [],
-            "human_approval_required": [],
         }
 
-    # The prompt tells the model exactly what it must preserve.
-    # In particular, it must not invent a user, role, group, policy or ARN.
+    # Short prompt: preserve exact resources, explain impact, and give a fix.
     prompt = f"""You are an AWS IAM incident analyst.
-
-The deterministic Python security engine has already detected and severity-rated the findings below.
-Do NOT replace or re-evaluate those findings. Do NOT invent AWS facts.
-
-Your task is to explain the detected incident precisely and operationally.
-
-For EVERY finding provided:
-1. Preserve the exact check_id.
-2. Preserve the exact severity.
-3. Preserve the exact resource_type and resource_name.
-4. State what is wrong with that specific resource.
-5. Explain the security/operational impact.
-6. Give a concrete recommended action.
-
-Then:
-7. Identify related findings when they clearly belong to the same incident.
-8. Give an investigation order using the exact resources/check IDs.
-9. Give a remediation order.
-10. Identify actions that require human approval.
-
-IMPORTANT:
-- Do not invent usernames, roles, groups, policy names, ARNs, permissions, or services.
-- Do not change CRITICAL/HIGH severity values supplied by the audit engine.
-- If a field cannot be determined from the evidence, say so rather than guessing.
-- Return ONLY valid JSON. No markdown or code fences.
+The audit engine already detected the findings. Do not change their severity or invent resources.
+For each finding, explain the problem and give one concrete fix. Then give the investigation order.
+Return JSON only.
 
 FINDINGS:
-{json.dumps(important, separators=(',', ':'))}
-"""
+{json.dumps(important, separators=(',', ':'))}"""
 
-    # The schema makes the output predictable for Python and keeps the answer
-    # focused on the exact resources rather than free-form prose.
     schema = {
         "type": "object",
         "properties": {
             "incident_summary": {"type": "string"},
             "overall_priority": {
                 "type": "string",
-                "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+                "enum": ["CRITICAL", "HIGH", "LOW"],
             },
             "findings": {
                 "type": "array",
+                "maxItems": 2,
                 "items": {
                     "type": "object",
                     "properties": {
-                        "check_id": {"type": "string"},
-                        "resource_type": {"type": "string"},
-                        "resource_name": {"type": "string"},
-                        "severity": {
-                            "type": "string",
-                            "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
-                        },
+                        "check": {"type": "string"},
+                        "resource": {"type": "string"},
                         "problem": {"type": "string"},
-                        "impact": {"type": "string"},
-                        "recommended_action": {"type": "string"},
+                        "solution": {"type": "string"},
                     },
-                    "required": [
-                        "check_id",
-                        "resource_type",
-                        "resource_name",
-                        "severity",
-                        "problem",
-                        "impact",
-                        "recommended_action",
-                    ],
+                    "required": ["check", "resource", "problem", "solution"],
                 },
             },
             "investigation_order": {
                 "type": "array",
+                "maxItems": 2,
                 "items": {"type": "string"},
             },
             "remediation_plan": {
                 "type": "array",
-                "items": {"type": "string"},
-            },
-            "human_approval_required": {
-                "type": "array",
+                "maxItems": 2,
                 "items": {"type": "string"},
             },
         },
@@ -511,19 +462,16 @@ FINDINGS:
             "findings",
             "investigation_order",
             "remediation_plan",
-            "human_approval_required",
         ],
     }
 
     payload = json.dumps({
         "model": model_id,
         "stream": False,
+        "think": False,
         "format": schema,
         "messages": [{"role": "user", "content": prompt}],
-        "options": {
-            "temperature": 0,
-            "num_predict": 250,
-        },
+        "options": {"temperature": 0, "num_predict": 100},
     }).encode("utf-8")
 
     request = urllib.request.Request(
@@ -545,10 +493,9 @@ FINDINGS:
         raise RuntimeError(
             f"Could not connect to Ollama at {ollama_url}: {exc}"
         ) from exc
-    except TimeoutError as exc:
+    except (TimeoutError, socket.timeout) as exc:
         raise RuntimeError(
-            "Ollama inference exceeded 60 seconds. "
-            "The deterministic audit is still valid; reduce model/context or use a faster instance."
+            "Ollama inference exceeded 60 seconds; deterministic audit results remain valid."
         ) from exc
 
     content = result.get("message", {}).get("content", "")
@@ -560,15 +507,18 @@ FINDINGS:
     except json.JSONDecodeError:
         return {"status": "unstructured_response", "raw_response": content}
 
-    # Validate the most important integrity rule on the AI output:
-    # the model must not silently change the source-of-truth severity/resource.
-    expected = {f.check_id: f for f in r.findings if f.severity in {"CRITICAL", "HIGH"}}
+    # Re-apply source-of-truth resource/severity from the deterministic engine.
+    expected = {
+        f.check_id: f
+        for f in r.findings
+        if f.severity in {"CRITICAL", "HIGH"}
+    }
     for item in ai_result.get("findings", []):
-        source = expected.get(item.get("check_id"))
+        source = expected.get(item.get("check"))
         if source:
-            item["resource_type"] = source.resource_type
-            item["resource_name"] = source.resource_name
+            item["resource"] = source.resource_name
             item["severity"] = source.severity
+            item["resource_type"] = source.resource_type
 
     ai_result["status"] = "ok"
     return ai_result
