@@ -578,7 +578,7 @@ def main():
     # main() is intentionally orchestration-only. It should be easy for students
     # to read this function as a workflow without digging through every audit rule.
     p = argparse.ArgumentParser(description="AWS IAM security audit with optional AIOps analysis")
-    p.add_argument("--profile", default=os.getenv("AWS_PROFILE")); p.add_argument("--region", default=os.getenv("AWS_REGION", "us-east-1"))
+    p.add_argument("--profile", default=os.getenv("AWS_PROFILE")); p.add_argument("--region", default=os.getenv("AWS_REGION", "ap-south-1"))
     p.add_argument("--max-key-age", type=int, default=90); p.add_argument("--min-severity", choices=SEVERITY, default="LOW")
     p.add_argument("--format", choices=["table", "json", "csv", "all"], default="table"); p.add_argument("--output-dir", default="reports")
     p.add_argument("--anomaly", action="store_true"); p.add_argument("--history-file", default="reports/iam_history.json")
