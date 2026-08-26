@@ -422,7 +422,7 @@ def select_ai_findings(report, max_findings=3):
 
 
 def ai_triage(r, ollama_url, model_id):
-    """Use Llama only for concise incident explanation and prioritization."""
+    """Use Llama for concise incident explanation and investigation ordering."""
     important = select_ai_findings(r, max_findings=3)
 
     if not important:
@@ -433,33 +433,32 @@ def ai_triage(r, ollama_url, model_id):
             "investigation_order": [],
         }
 
-    # Keep the prompt intentionally tiny: the local 1B model is CPU-bound.
+    # Keep the model input extremely small. The Python rule engine is authoritative;
+    # Llama only explains and prioritizes the already-detected findings.
     compact_findings = [
         {
             "check": f.check_id,
             "severity": f.severity,
             "type": f.resource_type,
             "resource": f.resource_name,
-            "problem": f.title[:160],
-            "fix": f.remediation[:160],
+            "problem": f.title[:120],
+            "fix": f.remediation[:120],
         }
         for f in important
     ]
 
     prompt = (
-        "Analyze these AWS IAM incident findings. "
-        "The audit engine already determined severity and resources. "
-        "Do not change severity or invent facts. "
-        "For each finding give one short problem explanation and one short fix. "
-        "Then give the investigation order. Return JSON only.\n\n"
+        "Analyze these AWS IAM findings. The audit engine already determined "
+        "severity and resource. Never change them or invent facts. "
+        "Use very short phrases: problem <= 8 words, solution <= 10 words. "
+        "Return JSON only. Then give investigation order as short steps.\n"
         f"FINDINGS={json.dumps(compact_findings, separators=(',', ':'))}"
     )
 
-    # Compact schema to reduce generation overhead on the 1B model.
+    # Minimal schema: fewer output fields means faster generation on a CPU-only 1B model.
     schema = {
         "type": "object",
         "properties": {
-            "incident_summary": {"type": "string"},
             "findings": {
                 "type": "array",
                 "maxItems": 3,
@@ -467,11 +466,12 @@ def ai_triage(r, ollama_url, model_id):
                     "type": "object",
                     "properties": {
                         "check": {"type": "string"},
+                        "type": {"type": "string"},
                         "resource": {"type": "string"},
                         "problem": {"type": "string"},
                         "solution": {"type": "string"},
                     },
-                    "required": ["check", "resource", "problem", "solution"],
+                    "required": ["check", "type", "resource", "problem", "solution"],
                 },
             },
             "investigation_order": {
@@ -480,19 +480,18 @@ def ai_triage(r, ollama_url, model_id):
                 "items": {"type": "string"},
             },
         },
-        "required": ["incident_summary", "findings", "investigation_order"],
+        "required": ["findings", "investigation_order"],
     }
 
     payload = json.dumps(
         {
             "model": "llama3.2:1b",
             "stream": False,
-            "think": False,
             "format": schema,
             "messages": [{"role": "user", "content": prompt}],
             "options": {
                 "temperature": 0,
-                "num_predict": 120,
+                "num_predict": 160,
             },
         }
     ).encode("utf-8")
@@ -509,55 +508,28 @@ def ai_triage(r, ollama_url, model_id):
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")
-        raise RuntimeError(
-            f"Ollama returned HTTP {exc.code} from {ollama_url}: {body}"
-        ) from exc
+        raise RuntimeError(f"Ollama returned HTTP {exc.code}: {body}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(
-            f"Could not connect to Ollama at {ollama_url}: {exc}"
-        ) from exc
-    except (TimeoutError, socket.timeout) as exc:
-        raise RuntimeError(
-            "Ollama inference exceeded 60 seconds; deterministic audit results remain valid."
-        ) from exc
+        raise RuntimeError(f"Could not connect to Ollama at {ollama_url}: {exc}") from exc
+    except socket.timeout as exc:
+        raise RuntimeError("Ollama inference exceeded 60 seconds; deterministic audit results remain valid.") from exc
 
     content = result.get("message", {}).get("content", "")
-    if not content:
-        raise RuntimeError("Ollama returned an empty AI response")
-
     try:
-        ai_result = json.loads(content)
+        ai = json.loads(content)
     except json.JSONDecodeError:
         return {"status": "unstructured_response", "raw_response": content}
 
-    # Python remains the source of truth for check, severity, type, and resource.
-    expected = {f.check_id: f for f in important}
-    output_findings = []
+    # Re-attach authoritative severity from Python so the LLM cannot override it.
+    authoritative = {(f.check_id, f.resource_name): f for f in important}
+    for item in ai.get("findings", []):
+        key = (item.get("check"), item.get("resource"))
+        src = authoritative.get(key)
+        if src:
+            item["severity"] = src.severity
 
-    for item in ai_result.get("findings", []):
-        source = expected.get(item.get("check"))
-        if not source:
-            continue
-
-        output_findings.append(
-            {
-                "check": source.check_id,
-                "severity": source.severity,
-                "type": source.resource_type,
-                "resource": source.resource_name,
-                "problem": str(item.get("problem", "")).strip(),
-                "solution": str(item.get("solution", "")).strip(),
-            }
-        )
-
-    return {
-        "status": "ok",
-        "incident_summary": str(
-            ai_result.get("incident_summary", "")
-        ).strip(),
-        "findings": output_findings,
-        "investigation_order": ai_result.get("investigation_order", [])[:3],
-    }
+    ai["status"] = "ok"
+    return ai
 
 # =============================================================================
 # 12. REPORTING
@@ -605,7 +577,7 @@ def main():
     # main() is intentionally orchestration-only. It should be easy for students
     # to read this function as a workflow without digging through every audit rule.
     p = argparse.ArgumentParser(description="AWS IAM security audit with optional AIOps analysis")
-    p.add_argument("--profile", default=os.getenv("AWS_PROFILE")); p.add_argument("--region", default=os.getenv("AWS_REGION", "us-east-1"))
+    p.add_argument("--profile", default=os.getenv("AWS_PROFILE")); p.add_argument("--region", default=os.getenv("AWS_REGION", "ap-south-1"))
     p.add_argument("--max-key-age", type=int, default=90); p.add_argument("--min-severity", choices=SEVERITY, default="LOW")
     p.add_argument("--format", choices=["table", "json", "csv", "all"], default="table"); p.add_argument("--output-dir", default="reports")
     p.add_argument("--anomaly", action="store_true"); p.add_argument("--history-file", default="reports/iam_history.json")
