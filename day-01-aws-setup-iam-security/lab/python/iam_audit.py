@@ -484,7 +484,7 @@ def ai_triage(r, ollama_url, model_id):
             "messages": [{"role": "user", "content": prompt}],
             "options": {
                 "temperature": 0,
-                "num_predict": 80,
+                "num_predict": 140,
             },
         }
     ).encode("utf-8")
