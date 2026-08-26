@@ -28,7 +28,7 @@ from __future__ import annotations
 # csv/json      -> machine-readable audit reports
 # os            -> read AWS/Ollama settings from environment variables
 # urllib        -> call Ollama's local HTTP API without another Python dependency
-import argparse, csv, json, os, sys, urllib.request, urllib.error
+import argparse, csv, json, os, sys, socket, urllib.request, urllib.error
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -387,57 +387,104 @@ def anomaly_check(r, path):
 # =============================================================================
 # The LLM receives sanitized findings only. It correlates, prioritizes and
 # proposes investigation/remediation order; it does not modify AWS.
-def ai_triage(r, ollama_url, model_id):
-    """Use Llama only for incident analysis, not security detection."""
-    # Keep the local LLM workload small. The Python rule engine remains the source
-    # of truth; Llama explains and prioritizes only the two most important findings.
-    important = [
-        {
-            "check": f.check_id,
-            "severity": f.severity,
-            "type": f.resource_type,
-            "resource": f.resource_name,
-            "problem": f.detail[:180],
-            "fix": f.remediation[:180],
-        }
-        for f in r.findings
-        if f.severity in {"CRITICAL", "HIGH"}
-    ][:2]
+def select_ai_findings(report, max_findings=5):
+    """Select a compact set of findings while covering different IAM resource types.
 
+    Priority:
+      1. CRITICAL/HIGH findings first.
+      2. Prefer different resource types (user, role, group, policy, account).
+      3. If fewer than max_findings remain, fill with the next highest-severity findings.
+    """
+    rank = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+    findings = sorted(
+        report.findings,
+        key=lambda f: (rank.get(f.severity, 99), f.resource_type, f.resource_name),
+    )
+
+    selected = []
+    seen_types = set()
+
+    # First pass: cover as many IAM resource types as possible among serious findings.
+    for f in findings:
+        if f.severity not in {"CRITICAL", "HIGH"}:
+            continue
+        if f.resource_type in seen_types:
+            continue
+        selected.append(f)
+        seen_types.add(f.resource_type)
+        if len(selected) >= max_findings:
+            return selected
+
+    # Second pass: if there are unused slots, add the next serious findings.
+    for f in findings:
+        if f.severity not in {"CRITICAL", "HIGH"} or f in selected:
+            continue
+        selected.append(f)
+        if len(selected) >= max_findings:
+            return selected
+
+    # Third pass: if fewer than max_findings are available at HIGH/CRITICAL,
+    # add representative MEDIUM findings so the AI can see group/account issues too.
+    for f in findings:
+        if f in selected or f.severity not in {"MEDIUM"}:
+            continue
+        if f.resource_type in seen_types:
+            continue
+        selected.append(f)
+        seen_types.add(f.resource_type)
+        if len(selected) >= max_findings:
+            break
+
+    return selected
+
+
+def ai_triage(r, ollama_url, model_id):
+    """Use Llama only for incident explanation/correlation, never authoritative detection."""
+    important = select_ai_findings(r, max_findings=5)
     if not important:
         return {
             "status": "no_ai_triage_needed",
             "incident_summary": "No CRITICAL or HIGH findings were detected.",
-            "overall_priority": "LOW",
             "findings": [],
             "investigation_order": [],
             "remediation_plan": [],
         }
 
-    # Short prompt: preserve exact resources, explain impact, and give a fix.
+    compact_findings = [
+        {
+            "check": f.check_id,
+            "severity": f.severity,
+            "type": f.resource_type,
+            "resource": f.resource_name,
+            "problem": f.detail[:220],
+            "fix": f.remediation[:220],
+        }
+        for f in important
+    ]
+
     prompt = f"""You are an AWS IAM incident analyst.
-The audit engine already detected the findings. Do not change their severity or invent resources.
-For each finding, explain the problem and give one concrete fix. Then give the investigation order.
+The audit engine already detected the findings below.
+Do not change severity. Never invent resources, users, groups, roles, or policies.
+Preserve each finding's check, severity, type, and resource exactly.
+For each finding, explain the problem and give one concrete fix.
 Return JSON only.
 
 FINDINGS:
-{json.dumps(important, separators=(',', ':'))}"""
+{json.dumps(compact_findings, separators=(',', ':'))}"""
 
     schema = {
         "type": "object",
         "properties": {
             "incident_summary": {"type": "string"},
-            "overall_priority": {
-                "type": "string",
-                "enum": ["CRITICAL", "HIGH", "LOW"],
-            },
             "findings": {
                 "type": "array",
-                "maxItems": 2,
+                "maxItems": 5,
                 "items": {
                     "type": "object",
                     "properties": {
                         "check": {"type": "string"},
+                        "severity": {"type": "string"},
+                        "type": {"type": "string"},
                         "resource": {"type": "string"},
                         "problem": {"type": "string"},
                         "solution": {"type": "string"},
@@ -447,22 +494,16 @@ FINDINGS:
             },
             "investigation_order": {
                 "type": "array",
-                "maxItems": 2,
+                "maxItems": 5,
                 "items": {"type": "string"},
             },
             "remediation_plan": {
                 "type": "array",
-                "maxItems": 2,
+                "maxItems": 5,
                 "items": {"type": "string"},
             },
         },
-        "required": [
-            "incident_summary",
-            "overall_priority",
-            "findings",
-            "investigation_order",
-            "remediation_plan",
-        ],
+        "required": ["incident_summary", "findings", "investigation_order", "remediation_plan"],
     }
 
     payload = json.dumps({
@@ -471,7 +512,7 @@ FINDINGS:
         "think": False,
         "format": schema,
         "messages": [{"role": "user", "content": prompt}],
-        "options": {"temperature": 0, "num_predict": 100},
+        "options": {"temperature": 0, "num_predict": 180},
     }).encode("utf-8")
 
     request = urllib.request.Request(
@@ -486,17 +527,11 @@ FINDINGS:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")
-        raise RuntimeError(
-            f"Ollama returned HTTP {exc.code} from {ollama_url}: {body}"
-        ) from exc
+        raise RuntimeError(f"Ollama returned HTTP {exc.code} from {ollama_url}: {body}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(
-            f"Could not connect to Ollama at {ollama_url}: {exc}"
-        ) from exc
+        raise RuntimeError(f"Could not connect to Ollama at {ollama_url}: {exc}") from exc
     except (TimeoutError, socket.timeout) as exc:
-        raise RuntimeError(
-            "Ollama inference exceeded 60 seconds; deterministic audit results remain valid."
-        ) from exc
+        raise RuntimeError("Ollama inference exceeded 60 seconds; deterministic audit results remain valid.") from exc
 
     content = result.get("message", {}).get("content", "")
     if not content:
@@ -507,19 +542,20 @@ FINDINGS:
     except json.JSONDecodeError:
         return {"status": "unstructured_response", "raw_response": content}
 
-    # Re-apply source-of-truth resource/severity from the deterministic engine.
-    expected = {
-        f.check_id: f
-        for f in r.findings
-        if f.severity in {"CRITICAL", "HIGH"}
-    }
+    # Re-apply source-of-truth resource and severity. Llama only explains/triages.
+    expected = {f.check_id: f for f in important}
+    output_findings = []
     for item in ai_result.get("findings", []):
         source = expected.get(item.get("check"))
-        if source:
-            item["resource"] = source.resource_name
-            item["severity"] = source.severity
-            item["resource_type"] = source.resource_type
+        if not source:
+            continue
+        item["check"] = source.check_id
+        item["resource"] = source.resource_name
+        item["resource_type"] = source.resource_type
+        item["severity"] = source.severity
+        output_findings.append(item)
 
+    ai_result["findings"] = output_findings
     ai_result["status"] = "ok"
     return ai_result
 
