@@ -48,7 +48,7 @@ if [ -n '${git_repository_url}' ]; then
   if [ -f /opt/cbc-day01/app/requirements.txt ]; then
     sudo -u ec2-user python3 -m venv /opt/cbc-day01/venv
     sudo -u ec2-user /opt/cbc-day01/venv/bin/pip install --upgrade pip
-    sudo -u ec2-user /opt/cbc-day01/venv/bin/pip install -r /opt/cbc-day01/app/requirements.txt
+    sudo -u ec2-user /opt/cbc-day01/venv/bin/pip install -r /opt/cbc-day01/app/day-01-aws-setup-iam-security/lab/python/requirements.txt
   fi
 fi
 
