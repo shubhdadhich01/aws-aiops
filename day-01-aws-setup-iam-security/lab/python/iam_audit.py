@@ -8,13 +8,13 @@ Workflow:
 
 The IAM checks remain deterministic security controls.
 The optional historical section provides statistical anomaly detection.
-The optional Ollama/Qwen3 section is the GenAI investigation and triage layer;
+The optional Ollama/Llama 3.2 section is the GenAI investigation and triage layer;
 it receives sanitized findings and never changes AWS resources.
 
 TEACHING MODEL:
     DevSecOps  = deterministic IAM security rules
     AIOps      = historical anomaly detection + incident triage
-    GenAI      = Qwen3:8b reasoning over the resulting incident context
+    GenAI      = Llama 3.2:1b reasoning over the resulting incident context
 """
 from __future__ import annotations
 
@@ -388,20 +388,21 @@ def anomaly_check(r, path):
 # The LLM receives sanitized findings only. It correlates, prioritizes and
 # proposes investigation/remediation order; it does not modify AWS.
 def ai_triage(r, ollama_url, model_id):
-    """Use a local LLM for incident analysis, not security detection."""
-    # Only send important findings. The deterministic rule engine has already
-    # scanned the account; the LLM should not receive hundreds of low-value items.
+    """Use a local LLM only for incident analysis, not security detection."""
+    # The Python rule engine is the source of truth. Only pass the highest-signal
+    # findings to the LLM so the small local model stays fast and focused.
     important = [
         {
             "check_id": f.check_id,
             "severity": f.severity,
             "resource": f.resource,
             "title": f.title,
-            "detail": f.detail,
+            # Limit detail length: AWS/IAM evidence can become very verbose.
+            "detail": f.detail[:250],
         }
         for f in r.findings
         if f.severity in {"CRITICAL", "HIGH"}
-    ][:10]
+    ][:3]
 
     if not important:
         return {
@@ -409,27 +410,29 @@ def ai_triage(r, ollama_url, model_id):
             "message": "No CRITICAL or HIGH findings were detected.",
         }
 
-    # Keep the prompt compact. Qwen3:1.7b is running locally on a CPU-based EC2,
-    # so sending only the high-signal findings keeps the demo responsive.
+    # Keep the task deliberately narrow. Llama 3.2:1b is used for correlation,
+    # prioritization and remediation sequencing, not for deciding whether a rule fired.
     prompt = f"""You are an AWS operations-security incident analyst.
-The deterministic IAM audit has already identified the following important findings.
-Do NOT re-evaluate whether the findings are valid and do NOT invent new AWS facts.
-Your job is to correlate them, explain their operational impact, prioritize investigation,
-and suggest a remediation sequence. Mark actions that require human approval.
+The deterministic IAM audit has already validated the findings below.
+Do not re-evaluate them, invent AWS facts, or change their severity.
 
-Security score: {r.score()}/100
-Severity counts: {json.dumps(r.counts())}
-Historical anomaly: {json.dumps(r.anomaly)}
-Important findings:
-{json.dumps(important, indent=2)}"""
+Return a concise incident analysis:
+- summarize the incident
+- identify related findings
+- give investigation order
+- give remediation order
+- identify actions needing human approval
 
-    # Ollama supports JSON-schema structured outputs. This is more reliable than
-    # asking a small local model to follow a prose-only output format.
+Findings:
+{json.dumps(important, separators=(',', ':'))}
+"""
+
+    # Structured JSON output keeps the result machine-readable and avoids fragile
+    # parsing of free-form model text.
     schema = {
         "type": "object",
         "properties": {
             "incident_summary": {"type": "string"},
-            "priority": {"type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]},
             "related_findings": {"type": "array", "items": {"type": "string"}},
             "investigation_order": {"type": "array", "items": {"type": "string"}},
             "remediation_sequence": {"type": "array", "items": {"type": "string"}},
@@ -437,7 +440,6 @@ Important findings:
         },
         "required": [
             "incident_summary",
-            "priority",
             "related_findings",
             "investigation_order",
             "remediation_sequence",
@@ -448,10 +450,12 @@ Important findings:
     payload = json.dumps({
         "model": model_id,
         "stream": False,
-        "think": False,
         "format": schema,
         "messages": [{"role": "user", "content": prompt}],
-        "options": {"temperature": 0, "num_predict": 160},
+        "options": {
+            "temperature": 0,
+            "num_predict": 80,
+        },
     }).encode("utf-8")
 
     request = urllib.request.Request(
@@ -474,7 +478,10 @@ Important findings:
             f"Could not connect to Ollama at {ollama_url}: {exc}"
         ) from exc
     except TimeoutError as exc:
-        raise RuntimeError(f"Ollama request timed out after 60 seconds: {exc}") from exc
+        raise RuntimeError(
+            "Ollama inference exceeded 60 seconds. "
+            "The deterministic audit is still valid; reduce model/context or use a faster instance."
+        ) from exc
 
     content = result.get("message", {}).get("content", "")
     if not content:
@@ -483,7 +490,6 @@ Important findings:
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        # Keep the raw answer rather than failing the entire security audit.
         return {"status": "unstructured_response", "raw_response": content}
 
 # =============================================================================
@@ -532,11 +538,11 @@ def main():
     # main() is intentionally orchestration-only. It should be easy for students
     # to read this function as a workflow without digging through every audit rule.
     p = argparse.ArgumentParser(description="AWS IAM security audit with optional AIOps analysis")
-    p.add_argument("--profile", default=os.getenv("AWS_PROFILE")); p.add_argument("--region", default=os.getenv("AWS_REGION", "us-east-1"))
+    p.add_argument("--profile", default=os.getenv("AWS_PROFILE")); p.add_argument("--region", default=os.getenv("AWS_REGION", "ap-south-1"))
     p.add_argument("--max-key-age", type=int, default=90); p.add_argument("--min-severity", choices=SEVERITY, default="LOW")
     p.add_argument("--format", choices=["table", "json", "csv", "all"], default="table"); p.add_argument("--output-dir", default="reports")
     p.add_argument("--anomaly", action="store_true"); p.add_argument("--history-file", default="reports/iam_history.json")
-    p.add_argument("--ai", action="store_true"); p.add_argument("--model-id", default=os.getenv("AIOPS_MODEL_ID", "qwen3:1.7b")); p.add_argument("--ollama-url", default=os.getenv("OLLAMA_URL", "http://localhost:11434")); p.add_argument("--fail-on", choices=SEVERITY)
+    p.add_argument("--ai", action="store_true"); p.add_argument("--model-id", default="llama3.2:1b"); p.add_argument("--ollama-url", default=os.getenv("OLLAMA_URL", "http://localhost:11434")); p.add_argument("--fail-on", choices=SEVERITY)
     a = p.parse_args()
     try:
         session = boto3.Session(profile_name=a.profile, region_name=a.region); identity = session.client("sts").get_caller_identity(); iam = session.client("iam")
