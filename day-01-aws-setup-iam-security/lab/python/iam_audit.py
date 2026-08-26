@@ -433,29 +433,30 @@ def ai_triage(r, ollama_url, model_id):
             "investigation_order": [],
         }
 
-    # Keep the model input extremely small. The Python rule engine is authoritative;
-    # Llama only explains and prioritizes the already-detected findings.
+    # Keep the model input extremely small. Python remains authoritative for
+    # check ID, severity, resource type, and resource name. Llama only explains
+    # the finding and suggests one short fix.
     compact_findings = [
         {
-            "check": f.check_id,
             "severity": f.severity,
             "type": f.resource_type,
             "resource": f.resource_name,
             "problem": f.title[:120],
-            "fix": f.remediation[:120],
         }
         for f in important
     ]
 
     prompt = (
-        "Analyze these AWS IAM findings. The audit engine already determined "
-        "severity and resource. Never change them or invent facts. "
-        "Use very short phrases: problem <= 8 words, solution <= 10 words. "
-        "Return JSON only. Then give investigation order as short steps.\n"
+        "You are an AWS IAM incident analyst.\n"
+        "The Python audit engine already determined severity and resource.\n"
+        "Do not change severity or invent facts.\n"
+        "For each finding return only two fields: problem and solution.\n"
+        "Problem: one short sentence. Solution: one short sentence.\n"
+        "Return JSON only.\n"
         f"FINDINGS={json.dumps(compact_findings, separators=(',', ':'))}"
     )
 
-    # Minimal schema: fewer output fields means faster generation on a CPU-only 1B model.
+    # Small schema: the LLM generates only the text Python does not already know.
     schema = {
         "type": "object",
         "properties": {
@@ -465,22 +466,14 @@ def ai_triage(r, ollama_url, model_id):
                 "items": {
                     "type": "object",
                     "properties": {
-                        "check": {"type": "string"},
-                        "type": {"type": "string"},
-                        "resource": {"type": "string"},
                         "problem": {"type": "string"},
                         "solution": {"type": "string"},
                     },
-                    "required": ["check", "type", "resource", "problem", "solution"],
+                    "required": ["problem", "solution"],
                 },
-            },
-            "investigation_order": {
-                "type": "array",
-                "maxItems": 3,
-                "items": {"type": "string"},
-            },
+            }
         },
-        "required": ["findings", "investigation_order"],
+        "required": ["findings"],
     }
 
     payload = json.dumps(
@@ -491,7 +484,7 @@ def ai_triage(r, ollama_url, model_id):
             "messages": [{"role": "user", "content": prompt}],
             "options": {
                 "temperature": 0,
-                "num_predict": 160,
+                "num_predict": 80,
             },
         }
     ).encode("utf-8")
@@ -520,16 +513,24 @@ def ai_triage(r, ollama_url, model_id):
     except json.JSONDecodeError:
         return {"status": "unstructured_response", "raw_response": content}
 
-    # Re-attach authoritative severity from Python so the LLM cannot override it.
-    authoritative = {(f.check_id, f.resource_name): f for f in important}
-    for item in ai.get("findings", []):
-        key = (item.get("check"), item.get("resource"))
-        src = authoritative.get(key)
-        if src:
-            item["severity"] = src.severity
+    # Rebuild the final structure in Python. This keeps check ID, severity,
+    # resource type/name, and investigation order authoritative and deterministic.
+    final_findings = []
+    for source, analysis in zip(important, ai.get("findings", [])):
+        final_findings.append({
+            "check": source.check_id,
+            "severity": source.severity,
+            "type": source.resource_type,
+            "resource": source.resource_name,
+            "problem": analysis.get("problem", ""),
+            "solution": analysis.get("solution", ""),
+        })
 
-    ai["status"] = "ok"
-    return ai
+    return {
+        "status": "ok",
+        "findings": final_findings,
+        "investigation_order": [f.check_id for f in important],
+    }
 
 # =============================================================================
 # 12. REPORTING
@@ -577,7 +578,7 @@ def main():
     # main() is intentionally orchestration-only. It should be easy for students
     # to read this function as a workflow without digging through every audit rule.
     p = argparse.ArgumentParser(description="AWS IAM security audit with optional AIOps analysis")
-    p.add_argument("--profile", default=os.getenv("AWS_PROFILE")); p.add_argument("--region", default=os.getenv("AWS_REGION", "ap-south-1"))
+    p.add_argument("--profile", default=os.getenv("AWS_PROFILE")); p.add_argument("--region", default=os.getenv("AWS_REGION", "us-east-1"))
     p.add_argument("--max-key-age", type=int, default=90); p.add_argument("--min-severity", choices=SEVERITY, default="LOW")
     p.add_argument("--format", choices=["table", "json", "csv", "all"], default="table"); p.add_argument("--output-dir", default="reports")
     p.add_argument("--anomaly", action="store_true"); p.add_argument("--history-file", default="reports/iam_history.json")
